@@ -1,0 +1,300 @@
+---
+title: "Final_ESG_MENA_Project"
+author: "monsieur_seth"
+date: "5/3/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r DB_path}
+default_path <- 
+  
+  # example on mac machine
+  if (Sys.info()["sysname"] == "Darwin") {
+  "~/Dropbox (IDinsight)/Higher Education/R exercises" 
+  
+    # example on linux machine
+  } else if (Sys.info()["sysname"] == "Linux") {
+    "~/Dropbox (IDinsight)/Higher Education/R exercises" 
+    
+    # example on win machine
+  } else if (Sys.info()["sysname"] == "Windows") {
+    paste0(
+      "C:/Users/", 
+      Sys.info()[7], 
+      "/Documents/ECC 2A/S8_APPD/Econometrics/practices"
+      ) 
+  }
+
+input <- paste0(
+  default_path, 
+  "/Input/")
+
+
+output <- paste0(
+  default_path, 
+  "/Output/")
+
+```
+
+
+
+## R Markdown
+
+```{r packages}
+#install.packages("missMDA")
+library(flextable)
+library(officer)
+library(broom)
+library(clusterPower)
+library(estimatr)
+library(fishmethods)
+library(haven)
+library(kableExtra)
+library(MatchIt)
+library(modelsummary)
+library(pwr)
+library(rddensity)
+library(skimr)
+library(texreg)
+library(tidyverse)
+library(tidyr)
+library(jtools)
+library(huxtable)
+library(FactoMineR)
+library(factoextra)
+library(corrplot)
+library(dplyr)
+library(psych)
+library(missMDA)
+library(leaflet)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r}
+raw_data <-  read_csv(paste0(input,"data_mena_brute.csv"))
+
+sapply(raw_data, class)
+
+
+# Fonction pour examiner en détail une ligne spécifique
+examine_row <- function(data, country, series_name) {
+  row_data <- raw_data %>%
+    filter(`Country Name` == country, `Series Name` == series_name)
+  
+  # Afficher les données brutes
+  print("Données brutes:")
+  print(row_data)
+  
+  # Vérifier les types de données
+  print("Types de données:")
+  print(sapply(row_data, class))
+  
+  # Vérifier les valeurs uniques pour chaque colonne numérique
+  numeric_cols <- sapply(row_data, is.numeric)
+  for (col in names(row_data)[numeric_cols]) {
+    print(paste("Valeurs uniques dans", col, ":"))
+    print(unique(row_data[[col]]))
+    print(paste("Classe de", col, ":", class(row_data[[col]])))
+  }
+  
+  # Tenter de calculer la moyenne et identifier les problèmes
+  tryCatch({
+    mean_value <- mean(as.numeric(unlist(row_data[, numeric_cols])), na.rm = TRUE)
+    print(paste("Moyenne calculée:", mean_value))
+  }, warning = function(w) {
+    print(paste("Avertissement lors du calcul de la moyenne:", w$message))
+  }, error = function(e) {
+    print(paste("Erreur lors du calcul de la moyenne:", e$message))
+  })
+  
+  # Vérifier les valeurs problématiques
+  problematic_values <- row_data[, numeric_cols] %>%
+    unlist() %>%
+    .[!is.na(.) & !is.finite(.)]
+  if (length(problematic_values) > 0) {
+    print("Valeurs problématiques trouvées:")
+    print(problematic_values)
+  }
+}
+
+# Utiliser la fonction pour examiner une ligne spécifique
+examine_row(raw_data, "Algeria", "Government expenditure on education, total (% of government expenditure)")
+
+# Fonction modifiée pour remplacer les NA
+replace_na_with_row_mean <- function(data, country, series_name) {
+  row_data <- raw_data %>%
+    filter(`Country Name` == country, `Series Name` == series_name)
+  
+  numeric_cols <- sapply(row_data, is.numeric)
+  
+  # Convertir explicitement en numérique et remplacer les valeurs infinies par NA
+  row_data[numeric_cols] <- lapply(row_data[numeric_cols], function(x) {
+    x <- as.numeric(as.character(x))
+    x[!is.finite(x)] <- NA
+    return(x)
+  })
+  
+  # Calculer la moyenne
+  mean_value <- mean(unlist(row_data[numeric_cols]), na.rm = TRUE)
+  
+  # Remplacer les NA par la moyenne
+  row_data[numeric_cols] <- lapply(row_data[numeric_cols], function(x) {
+    ifelse(is.na(x), mean_value, x)
+  })
+  
+  # Mettre à jour la ligne dans le dataframe original
+  data[data$`Country Name` == country & data$`Series Name` == series_name, numeric_cols] <- row_data[numeric_cols]
+  
+  return(data)
+}
+
+# Appliquer la fonction à data_mena_brute
+data_mena_imputed <- replace_na_with_row_mean(raw_data, "Algeria", "Government expenditure on education, total (% of government expenditure)")
+# Vérifier le résultat pour le pays et la série spécifiés
+result_check <- data_mena_imputed %>%
+  filter(`Country Name` == "Algeria", `Series Name` == "Government expenditure on education, total (% of government expenditure)")
+
+print(result_check)
+
+# Vérifier s'il reste des NA ou NaN pour ce pays et cette série
+na_count <- sum(is.na(result_check))
+print(paste("Nombre de NA ou NaN restants pour ce pays et cette série:", na_count))
+
+
+```
+
+
+
+```{r}
+
+# Fonction pour remplacer les NA par la moyenne de la ligne
+replace_na_with_row_mean <- function(data, country, series_name) {
+  row_data <- raw_data %>%
+    filter(`Country Name` == country, `Series Name` == series_name)
+  
+  numeric_cols <- sapply(row_data, is.numeric)
+  
+  # Convertir explicitement en numérique et remplacer les valeurs infinies par NA
+  row_data[numeric_cols] <- lapply(row_data[numeric_cols], function(x) {
+    x <- as.numeric(as.character(x))
+    x[!is.finite(x)] <- NA
+    return(x)
+  })
+  
+  # Calculer la moyenne
+  mean_value <- mean(unlist(row_data[numeric_cols]), na.rm = TRUE)
+  
+  # Remplacer les NA par la moyenne
+  row_data[numeric_cols] <- lapply(row_data[numeric_cols], function(x) {
+    ifelse(is.na(x), mean_value, x)
+  })
+  
+  return(row_data)
+}
+
+# Fonction pour appliquer le remplacement à tout le dataframe
+replace_all_na_with_row_mean <- function(data) {
+  # Obtenir toutes les combinaisons uniques de pays et de séries
+  unique_combinations <- raw_data %>%
+    select(`Country Name`, `Series Name`) %>%
+    distinct()
+  
+  # Appliquer la fonction de remplacement à chaque combinaison
+  result <- purrr::pmap_dfr(unique_combinations, function(`Country Name`, `Series Name`) {
+    replace_na_with_row_mean(data, `Country Name`, `Series Name`)
+  })
+  
+  return(result)
+}
+
+# Appliquer la fonction à l'ensemble du dataframe
+data_mena_imputed <- replace_all_na_with_row_mean(raw_data)
+
+# Vérifier le résultat
+na_count <- sum(is.na(raw_data))
+print(paste("Nombre total de NA restants:", na_count))
+
+# Afficher un résumé des données imputées
+summary(data_mena_imputed)
+```
+##Data Cleaning
+```{r}
+colnames(data_mena_imputed) <- c('Country','Country Code', 'Series Name','2000','2001','2002','2003','2004','2005','2006','2007','2008','2009','2010','2011','2012','2013','2014','2015','2016','2017','2018','2019','2020')
+long_data <- data_mena_imputed %>% 
+  pivot_longer(c('2000','2001','2002','2003','2004','2005','2006','2007','2008','2009','2010','2011','2012','2013','2014','2015','2016','2017','2018','2019','2020'), names_to = "Years", values_to = "Values")
+
+
+wide_data <- long_data %>% 
+  pivot_wider(names_from =`Series Name`, values_from =Values)
+
+clean_data<-wide_data
+
+```
+##Perform the PCA 
+```{r}
+### PCA of all observation
+analyse_data1<-clean_data%>% 
+  select(-c(Country, `Country Code`, `Years` ))
+
+mydata_s1 <- scale(analyse_data1)
+
+out.pca1 <- PCA(analyse_data1, scale.unit=TRUE, ncp = 3,
+               graph=FALSE)
+summary(out.pca1,nbelements=Inf)
+##graph
+
+fviz_pca_ind (out.pca1)
+fviz_eig(out.pca1, addlabels=TRUE)
+
+#correlation circle
+fviz_pca_var (out.pca1)
+
+fviz_pca_var (out.pca1, col.var = "red")
+
+##Correlation matrix
+
+var <- get_pca_var(out.pca1)
+var
+
+head(var$coord)
+
+## Contribution to the principal components
+head(var$contrib)
+fviz_contrib(out.pca1, choice = "var", axes = 1, top = 7)
+fviz_contrib(out.pca1, choice = "var", axes = 2, top = 7)
+fviz_contrib(out.pca1, choice = "var", axes = 3, top = 7)
+
+rotation<-varimax(var$cor, normalize = TRUE)
+rotation
+```
+##Construction of the ESG index
+```{r}
+
+data_completed<-clean_data
+GOVI=t(0.18%*%data_completed$`Control of Corruption: Estimate`+0.19%*%data_completed$`Government Effectiveness: Estimate`+0.16%*%data_completed$`Political Stability and Absence of Violence/Terrorism: Estimate`+0.17%*%data_completed$`Regulatory Quality: Estimate`+0.19%*%data_completed$`Rule of Law: Estimate`+0.11%*%data_completed$`Voice and Accountability: Estimate`)
+
+SODI=t(0.19%*%data_completed$`School enrollment, primary (% gross)`+0.17%*%data_completed$`Unemployment, total (% of total labor force) (modeled ILO estimate)`+0.22%*%data_completed$`Access to electricity (% of population)`+0.21%*%data_completed$`Life expectancy at birth, total (years)`+0.08%*%data_completed$`Proportion of seats held by women in national parliaments (%)`+0.13%*%data_completed$`Ratio of female to male labor force participation rate (%) (modeled ILO estimate)`)
+
+ENVI=t(0.26%*%data_completed$`Energy imports, net (% of energy use)`+0.24%*%data_completed$`Energy use (kg of oil equivalent per capita)`+0.21%*%data_completed$`Renewable electricity output (% of total electricity output)`+0.23%*%data_completed$`CO2 emissions (metric tons per capita)`+0.06%*%data_completed$`Renewable energy consumption (% of total final energy consumption)`)
+
+ESG=0.61*GOVI+0.22*SODI+0.17*ENVI
+
+data_ESG=cbind(data_completed,GOVI,SODI,ENVI,ESG)
+```
+
+##Vizialisation
+```{r comp}
+write.csv(final_data,"final_data.csv")
+File -> New File -> Shiny Web App -> Multiple File
+data_viz<-  read_csv(paste0(input,"ESG_viz.csv"))
+final_data=cbind(data_ESG,data_viz)
+leaflet() %>% addTiles()
+```
+
